@@ -133,6 +133,23 @@ async def chat(thread_id: str, message: Message):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/chat/thread/{thread_id}")
+async def delete_thread(thread_id: str):
+    '''
+    Delete a thread and its associated data
+    '''
+    if thread_id not in threads_store.yield_keys():
+        raise HTTPException(status_code=404, detail="Thread not found")
+    
+    # Delete the thread
+    threads_store.mdelete([thread_id])
+    
+    # Remove the agent if it exists
+    if thread_id in agents:
+        del agents[thread_id]
+    
+    return {"status": "success"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
