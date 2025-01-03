@@ -172,9 +172,6 @@ const renderedContent = computed(() => {
     gap: 0rem;
 }
 
-:deep(li){
-    margin-bottom: -1rem;
-}
 
 :deep(a) {
     color: #89CFF0;
@@ -198,6 +195,7 @@ const renderedContent = computed(() => {
 :deep(p) {
     margin-block-start: 0;
     margin-block-end: 0;
+    margin-bottom: -1rem;
 }
 
 :deep(ul), :deep(ol) {

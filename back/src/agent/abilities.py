@@ -42,21 +42,34 @@ def get_website_content(url: str):
 #     )
 #     return serialized, retrieved_docs
 
-class RetriveTool(BaseTool):
+class LongTermMemory(BaseTool):
     data_store: SourceStore
-    name: str = "retrive_tool"
-    description: str = """Retrieve information from the database. When you are not sure about the answer, use this tool to retrieve information from the database.
-    If you think the answer can be found in internet, try using the get_website_content as alternative."""
+    name: str = "get_long_term_memory"
+    description: str = """
+    You have a long term memory. Recall what you have learned from the past.
+    """
 
     def _run(self, query: str):
-        retrieved_docs = self.data_store.vector_store.similarity_search(query, k=2)
+        retrieved_docs = self.data_store.retriever.get_relevant_documents(query)
         serialized = "\n\n".join(
             (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
             for doc in retrieved_docs
         )
         if len(retrieved_docs) == 0:
-            return "No information found in the database. If you think it can be found in internet, try using the get_website_content as alternative."
+            return "No information found in the memory. If you think it can be found in internet, try using the get_website_content as alternative."
         return serialized, retrieved_docs
+    
+class Memorize(BaseTool):
+    data_store: SourceStore
+    name: str = "memorize"
+    description: str = """
+    Whenever you encounter information that you think is important, the best thing to do is to learn and remember it.
+    All the memory will be stored in your long term memory and can be acessed with long_term_memory in the future.
+    Use this tool frequently so you can be more and more smarter in the future.
+    """
+
+    def _run(self, memory: str):
+        self.data_store.add_memory(memory)
 
 @tool(response_format="content")
 def execute_python_code(query: str):

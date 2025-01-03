@@ -1,7 +1,8 @@
+import datetime
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
-from .util import DiskStore
+from .util import DocumentDiskStore
 from langchain.retrievers import ParentDocumentRetriever
 from pathlib import Path
 from langchain_core.documents import Document
@@ -18,7 +19,7 @@ class SourceStore:
             collection_name="chunks", embedding_function=OpenAIEmbeddings(), persist_directory="./data/chroma"
         )
         # The storage layer for the parent documents
-        doc_store = DiskStore(str(Path(persist_directory) / "doc_store"))
+        doc_store = DocumentDiskStore(str(Path(persist_directory) / "doc_store"))
         self.retriever = ParentDocumentRetriever(
             vectorstore=self.vector_store,
             docstore=doc_store,
@@ -26,5 +27,15 @@ class SourceStore:
         )
 
     def add_text_document(self, document: str):
-        docs = Document(page_content=document)
+        docs = Document(page_content=document, metadata={
+            "source": "text",
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        self.retriever.add_documents([docs])
+
+    def add_memory(self, memory: str):
+        docs = Document(page_content=memory, metadata={
+            "source": "memory",
+            "timestamp": datetime.datetime.now().isoformat()
+        })
         self.retriever.add_documents([docs])
