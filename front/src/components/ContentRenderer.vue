@@ -23,7 +23,7 @@
             </div>
         </template>
         <template v-else>
-            {{ content }}
+            <div v-html="renderedContent"></div>
             <span v-if="isStreaming" class="cursor"></span>
         </template>
     </div>
@@ -32,6 +32,7 @@
 <script setup lang="ts">
 import { IncompleteJsonParser } from 'incomplete-json-parser';
 import { computed } from 'vue'
+import { marked } from 'marked'
 
 const props = defineProps<{
     content: any
@@ -89,6 +90,11 @@ const formatKey = (key: string | number) => {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ')
 }
+
+const renderedContent = computed(() => {
+    if (typeof props.content !== 'string') return props.content
+    return marked(props.content, { breaks: true })
+})
 </script>
 
 <style scoped>
@@ -148,5 +154,61 @@ const formatKey = (key: string | number) => {
     0% { opacity: 1; }
     50% { opacity: 0; }
     100% { opacity: 1; }
+}
+
+:deep(ul){
+    list-style-type: disc;
+    margin-left: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+:deep(ol){
+    list-style-type: decimal;
+    margin-left: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0rem;
+}
+
+:deep(li){
+    margin-bottom: -1rem;
+}
+
+:deep(a) {
+    color: #89CFF0;
+    text-decoration: underline;
+}
+
+:deep(pre) {
+    background-color: #2a2b32;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+}
+
+:deep(code) {
+    font-family: monospace;
+    background-color: #2a2b32;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.3rem;
+}
+
+:deep(p) {
+    margin-block-start: 0;
+    margin-block-end: 0;
+}
+
+:deep(ul), :deep(ol) {
+    padding-left: 1.5rem;
+    margin: 0.5rem 0;
+}
+
+:deep(blockquote) {
+    border-left: 3px solid #4d4d4f;
+    margin: 0.5rem 0;
+    padding-left: 1rem;
+    color: #acacac;
 }
 </style> 
