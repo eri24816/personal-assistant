@@ -61,11 +61,9 @@ async def get_thread(thread_id: str):
     if thread_id not in threads_store.yield_keys():
         raise HTTPException(status_code=404, detail="Thread not found")
     
-    thread_data = threads_store.mget([thread_id])
+    thread_data = threads_store.mget([thread_id])[0]
     
-    return {
-        "thread_data": thread_data,
-    }
+    return thread_data
 
 @app.post("/api/chat/thread/{thread_id}/")
 async def chat(thread_id: str, message: Message):
@@ -109,7 +107,7 @@ async def chat(thread_id: str, message: Message):
                         'type': chunk.type, # tool
                         'status': chunk.status
                     }
-                yield json.dumps(result)
+                yield json.dumps(result) + '\n' # \n is used to separate the messages so frontend can process each as json
 
             # async for step in response_stream:
             #     message = step['messages'][-1]

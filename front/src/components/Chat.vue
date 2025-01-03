@@ -1,17 +1,18 @@
 <template>
     <div class="chat-container">
         <div class="messages" ref="messagesContainer">
-            <div v-for="(message, index) in messages" 
+            <div v-for="(message, index) in uiMessages" 
                 :key="index" 
                 :class="['message', message.role]"
             >
                 <div class="message-header" v-if="message.header">
                     {{ message.header }}
                 </div>
-                <div class="message-content">
-                    {{ message.content }}
-                    <span v-if="isStreaming && index === messages.length - 1" class="cursor"></span>
-                </div>
+                <ContentRenderer 
+                    class="message-content" 
+                    :content="message.content" 
+                    :isStreaming="isStreaming && index === uiMessages.length - 1" 
+                />
                 <div v-if="message.collapsableContent" class="collapsable-container">
                     <button 
                         class="collapse-toggle"
@@ -33,7 +34,10 @@
                         class="message-collapsable-content"
                         :class="{ collapsed: collapsedStates[index] }"
                     >
-                        {{ message.collapsableContent }}
+                        <ContentRenderer 
+                            :content="message.collapsableContent" 
+                            :isStreaming="isStreaming && index === uiMessages.length - 1" 
+                        />
                     </div>
                 </div>
             </div>
@@ -64,6 +68,8 @@
 </template>
 
 <script setup lang="ts">
+import ContentRenderer from './ContentRenderer.vue'
+import { IncompleteJsonParser } from 'incomplete-json-parser'
 import { ref, onMounted, watch } from 'vue'
 
 interface Message {
@@ -77,7 +83,7 @@ const props = defineProps<{
     threadId?: string
 }>()
 
-const messages = ref<Message[]>([])
+const uiMessages = ref<Message[]>([])
 const userInput = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -85,12 +91,57 @@ const isStreaming = ref(false)
 const collapsedStates = ref<Record<number, boolean>>({})
 
 const fetchThreadData = async (id: string) => {
-    try {
-        const response = await fetch(`/api/chat/thread/${id}/`)
-        const data = await response.json()
-        messages.value = data.messages || []
-    } catch (error) {
-        console.error('Failed to fetch thread data:', error)
+
+    const response = await fetch(`/api/chat/thread/${id}/`)
+    const payload = await response.json()
+    uiMessages.value = []
+    if (payload.state == null) {
+        return // empty thread
+    }
+    const rawMessages = payload.state.messages
+    const toolCallMessages = new Map<string, Message>() // id -> message
+    for (const message of rawMessages) {
+        processMessage(message, toolCallMessages)
+    } 
+}
+
+const processMessage = (message: any, toolCallMessages: Map<string, Message>) => {
+    if (message.type == 'ai') {
+        if (message.content != '') {
+            uiMessages.value.push({
+                role: 'ai',
+                content: message.content
+            })
+        }
+
+        for (const toolCall of message.tool_calls) {
+            toolCallMessages.set(toolCall.id, {
+                role: 'system',
+                header: toolCall.name,
+                content: toolCall.args
+            })
+            uiMessages.value.push(toolCallMessages.get(toolCall.id)!)
+        }
+        
+    }
+    else if (message.type == 'human') {
+        uiMessages.value.push({
+            role: 'user',
+            content: message.content
+        })
+    }else if (message.type == 'tool') {
+        let uiMessage: Message | undefined = toolCallMessages.get(message.tool_call_id)
+        if (uiMessage == undefined) {
+            uiMessage = {
+                role: 'system',
+                content: 'missing'
+            }
+            uiMessages.value.push(uiMessage)
+        }
+        uiMessage.collapsableContent = message.content
+        if (message.artifact != null) {
+            uiMessage.collapsableContent += message.artifact[0].page_content
+        }
     }
 }
 
@@ -113,13 +164,19 @@ const sendMessage = async () => {
     userInput.value = ''
 
     // Add user message
-    messages.value.push({
+    uiMessages.value.push({
         role: 'user',
         content: messageContent
     })
 
     try {
         isStreaming.value = true
+        let accumulatingMessage: Message = {
+            role: 'ai',
+            content: ''
+        }
+        uiMessages.value.push(accumulatingMessage)
+        scrollToBottom()
         const response = await fetch(`/api/chat/thread/${props.threadId}/`, {
             method: 'POST',
             headers: {
@@ -131,67 +188,25 @@ const sendMessage = async () => {
         const reader = response.body?.getReader()
         if (!reader) throw new Error('No reader available')
 
-        let accumulatingMessage: Message = {
-            role: 'ai',
-            content: ''
-        }
-        messages.value.push(accumulatingMessage)
         while (true) {
             const { done, value } = await reader.read()
             if (done) break
             
-            console.log(new TextDecoder().decode(value))
+            const payloadString = new TextDecoder().decode(value)
+            //sometimes the value have multiple lines, so we need to split it
             // Convert the chunk to text
-            const payload = JSON.parse(new TextDecoder().decode(value))
-            // Append the new chunk to the assistant's message
-            const chunk = payload.chunk
-            let currentRole: 'user' | 'ai' | 'system' = 'ai'
-            if (chunk.type === 'AIMessageChunk') {
-                if (chunk.content == '') {
-                    continue
-                }
-                currentRole = 'ai'
-            } else if (chunk.type === 'tool_call_chunk' || chunk.type === 'tool') {
-                currentRole = 'system'
-            }else{
-                throw new Error('Unknown chunk type: ' + chunk.type)
-            }
-
-            if(accumulatingMessage.role !== currentRole) {
-                if (accumulatingMessage.content == ''){
-                    const poppedMessage = messages.value.pop()
-                    console.log('popped empty message', poppedMessage)
-                }
-                accumulatingMessage = { role: currentRole, content: '' }
-                messages.value.push(accumulatingMessage)
-                console.log('pushed new message', accumulatingMessage)
-            }
-
-            // Append the new chunk to the assistant's message
-            if (chunk.type === 'AIMessageChunk') {
-                accumulatingMessage.content += chunk.content
-            }else if (chunk.type === 'tool_call_chunk') {
-                accumulatingMessage.content += chunk.args
-                if (chunk.name !== null) {
-                    accumulatingMessage.header = chunk.name
-                }
-            }else if (chunk.type === 'tool') {
-                accumulatingMessage.collapsableContent = chunk.content
-            }
-
-            // doing this so vue can detect the change
-            const lastMessage = messages.value.pop()!
-            messages.value.push(lastMessage)
-
-
-            // Scroll to bottom
-            if (messagesContainer.value) {
-                messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+            for (const line of payloadString.split('\n')) { 
+                (window as any).debug = line
+                if (line.trim() == '') continue
+                const payload = JSON.parse(line)
+                // Append the new chunk to the assistant's message
+                const chunk = payload.chunk
+                accumulatingMessage = processMessageChunk(chunk, accumulatingMessage) || accumulatingMessage
             }
         }
     } catch (error) {
         console.error('Error processing message:', error)
-        messages.value.push({
+        uiMessages.value.push({
             role: 'system',
             content: 'Failed to send message. Please try again.'
         })
@@ -200,8 +215,62 @@ const sendMessage = async () => {
     }
 }
 
+
+const processMessageChunk = (chunk: any, accumulatingMessage: Message) => {
+    let currentRole: 'user' | 'ai' | 'system' = 'ai'
+    if (chunk.type === 'AIMessageChunk') {
+        if (chunk.content == '') {
+            return
+        }
+        currentRole = 'ai'
+    } else if (chunk.type === 'tool_call_chunk' || chunk.type === 'tool') {
+        currentRole = 'system'
+    }else{
+        throw new Error('Unknown chunk type: ' + chunk.type)
+    }
+    
+    if(accumulatingMessage.role !== currentRole) {
+        if (accumulatingMessage.content == ''){
+            const poppedMessage = uiMessages.value.pop()
+        }
+        // collapse the previous message
+        const lastMessageId = uiMessages.value.length - 1
+        collapsedStates.value[lastMessageId] = true
+        accumulatingMessage = { role: currentRole, content: '' }
+        uiMessages.value.push(accumulatingMessage)
+    }
+    
+    // Append the new chunk to the assistant's message
+    if (chunk.type === 'AIMessageChunk') {
+        accumulatingMessage.content += chunk.content
+    }else if (chunk.type === 'tool_call_chunk') {
+        accumulatingMessage.content += chunk.args
+        if (chunk.name !== null) {
+            accumulatingMessage.header = chunk.name
+        }
+    }else if (chunk.type === 'tool') {
+        accumulatingMessage.collapsableContent = chunk.content
+    }
+    
+    // doing this so vue can detect the change
+    const lastMessage = uiMessages.value.pop()!
+    uiMessages.value.push(lastMessage)
+    
+    scrollToBottom()
+
+    return accumulatingMessage
+}
+
+const scrollToBottom = () => {
+    setTimeout(() => {
+        if (messagesContainer.value) {
+            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+        }
+    }, 300)
+}
+
 // Auto-scroll when new messages arrive
-watch(() => messages, () => {
+watch(() => uiMessages, () => {
     if (messagesContainer.value) {
         messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
@@ -212,9 +281,9 @@ const toggleCollapse = (index: number) => {
 }
 
 // Initialize collapse state for new messages
-watch(() => messages, () => {
-    const lastIndex = messages.value.length - 1
-    if (messages.value[lastIndex]?.collapsableContent) {
+watch(() => uiMessages, () => {
+    const lastIndex = uiMessages.value.length - 1
+    if (uiMessages.value[lastIndex]?.collapsableContent) {
         collapsedStates.value[lastIndex] = false
     }
 }, { deep: true })

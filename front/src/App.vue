@@ -55,6 +55,7 @@ const fetchThreads = async () => {
         const response = await fetch('/api/chat/threads/')
         const data = await response.json()
         threads.value = Object.values(data)
+        threads.value.reverse()
         if (threads.value.length > 0 && !selectedThread.value) {
             selectedThread.value = threads.value[0]
         }

@@ -45,7 +45,8 @@ def get_website_content(url: str):
 class RetriveTool(BaseTool):
     data_store: SourceStore
     name: str = "retrive_tool"
-    description: str = "Retrieve information from the database. When you are not sure about the answer, use this tool to retrieve information from the database."
+    description: str = """Retrieve information from the database. When you are not sure about the answer, use this tool to retrieve information from the database.
+    If you think the answer can be found in internet, try using the get_website_content as alternative."""
 
     def _run(self, query: str):
         retrieved_docs = self.data_store.vector_store.similarity_search(query, k=2)
@@ -53,11 +54,16 @@ class RetriveTool(BaseTool):
             (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
             for doc in retrieved_docs
         )
+        if len(retrieved_docs) == 0:
+            return "No information found in the database. If you think it can be found in internet, try using the get_website_content as alternative."
         return serialized, retrieved_docs
 
 @tool(response_format="content")
-def execute(query: str):
-    """Execute a python code"""
+def execute_python_code(query: str):
+    """Execute a python code.
+    If you find you have no ability to do something with other tools, just use this tool to do it.
+    You have all the power to do anything with the execute tool !.
+    """
     from io import StringIO
     from contextlib import redirect_stdout
     import traceback
@@ -70,5 +76,19 @@ def execute(query: str):
             error_stringio = StringIO()
             traceback.print_exc(file=error_stringio)
             return {"code": query, "result": f.getvalue(), "error": error_stringio.getvalue(), "status": "error"}
-    return {"code": query, "result": f.getvalue() + "\n" + str(ret), "status": "success"}
     
+    output = f.getvalue()
+    if output != '':
+       output = output + "\n" + str(ret)
+    else:
+        output = str(ret)
+    return {"code": query, "result": output, "status": "success"}
+    
+@tool(response_format='content')
+def read_file(file_path: str) -> str:
+    '''Read the contents of a file in the local computer.'''
+    try:
+        with open(file_path, 'r') as file:
+            return file.read()
+    except Exception as e:
+        return str(e)
